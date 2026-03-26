@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(curl -X POST http://localhost:3000/api/auth/register -H \"Content-Type: application/json\" -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"admin123\"\"}')",
+      "Bash(curl:*)",
+      "Bash(cd:*)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluIiwiaWF0IjoxNzc0NTMzMTM3LCJleHAiOjE3NzUxMzc5Mzd9.PH3doT1tMjB9ROfTxpP9Ng0odpNcGLEuFziyw2XZi8g\")",
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(pkill -f \"node.*backend\")",
+      "Bash(sudo apt-get:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls -la prisma/*.db)",
+      "Bash(sqlite3:*)",
+      "Bash(lsof -ti:3000)",
+      "Bash(xargs kill:*)",
+      "Bash(pkill -f \"tsx watch\")",
+      "Bash(node:*)",
+      "Bash(netstat -tlnp)",
+      "Bash(pkill:*)",
+      "Bash(lsof -i:3000)"
+    ]
+  }
+}
