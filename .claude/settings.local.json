@@ -21,7 +21,16 @@
       "Bash(node:*)",
       "Bash(netstat -tlnp)",
       "Bash(pkill:*)",
-      "Bash(lsof -i:3000)"
+      "Bash(lsof -i:3000)",
+      "Bash(unzip -l commandlinetools-linux-9477386_latest.zip)",
+      "Bash(java -version)",
+      "Bash(update-alternatives --query java)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(chmod:*)",
+      "Bash(xargs -r kill -9)",
+      "Bash(lsof -ti:5173)",
+      "Bash(git push:*)"
     ]
   }
 }
