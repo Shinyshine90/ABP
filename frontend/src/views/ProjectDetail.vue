@@ -14,7 +14,8 @@ const loading = ref(false)
 const buildDialogVisible = ref(false)
 const buildForm = ref({
   branch: '',
-  gradle_task: ''
+  gradle_task: '',
+  jdk_version: '17'
 })
 
 const branches = ['main', 'develop', 'release', 'feature/new-ui']
@@ -53,13 +54,13 @@ const fetchBuilds = async () => {
 }
 
 const openBuildDialog = () => {
-  buildForm.value = { branch: 'main', gradle_task: 'assembleRelease' }
+  buildForm.value = { branch: 'main', gradle_task: 'assembleRelease', jdk_version: '17' }
   buildDialogVisible.value = true
 }
 
 const triggerBuild = async () => {
   try {
-    await buildApi.create(projectId, buildForm.value.branch, buildForm.value.gradle_task)
+    await buildApi.create(projectId, buildForm.value.branch, buildForm.value.gradle_task, buildForm.value.jdk_version)
     ElMessage.success('构建已触发')
     buildDialogVisible.value = false
     await fetchBuilds()
@@ -130,6 +131,13 @@ const downloadApk = (buildId: number) => {
         </el-form-item>
         <el-form-item label="构建任务">
           <el-input v-model="buildForm.gradle_task" placeholder="assembleRelease" />
+        </el-form-item>
+        <el-form-item label="JDK 版本">
+          <el-select v-model="buildForm.jdk_version">
+            <el-option label="JDK 8" value="8" />
+            <el-option label="JDK 11" value="11" />
+            <el-option label="JDK 17" value="17" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>

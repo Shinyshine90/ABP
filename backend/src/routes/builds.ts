@@ -21,12 +21,13 @@ router.get('/', authMiddleware, async (req, res) => {
 })
 
 router.post('/', authMiddleware, async (req, res) => {
-  const { project_id, branch, gradle_task } = req.body
+  const { project_id, branch, gradle_task, jdk_version } = req.body
   const build = await prisma.build.create({
     data: {
       projectId: project_id,
       branch: branch || 'main',
       gradleTask: gradle_task || 'assembleRelease',
+      jdkVersion: jdk_version || '17',
       status: 'pending',
       createdBy: req.user.username
     }

@@ -80,13 +80,6 @@ const loadData = async () => {
 }
 
 const installTool = async (tool: 'git' | 'jdk' | 'androidSdk') => {
-  // 弹出密码输入对话框
-  const password = prompt('请输入管理员密码（用于安装软件）：')
-  if (!password) {
-    ElMessage.warning('需要管理员密码才能安装')
-    return
-  }
-
   installing.value[tool] = true
   progress.value[tool] = { percent: 0, message: '准备安装...', logs: [] }
 
@@ -99,8 +92,7 @@ const installTool = async (tool: 'git' | 'jdk' | 'androidSdk') => {
       },
       body: JSON.stringify({
         tool: tool === 'androidSdk' ? 'android_sdk' : tool,
-        version: selectedVersions.value[tool],
-        sudo_password: password
+        version: selectedVersions.value[tool]
       })
     })
 

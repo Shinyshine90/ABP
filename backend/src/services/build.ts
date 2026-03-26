@@ -49,7 +49,19 @@ export async function startBuild(buildId: number) {
     await execAsync(`mkdir -p ${outputDir}`)
 
     // 5. 执行构建
-    await logAndExec(buildId, `cd ${repoDir} && ./gradlew ${build.gradleTask}`)
+    const androidHome = config.androidHome || paths.sdkManager(config.workspaceDir)
+    const javaHome = paths.jdk(config.workspaceDir, build.jdkVersion)
+
+    // 验证 JDK 是否存在
+    if (!fs.existsSync(path.join(javaHome, 'bin', 'java'))) {
+      throw new Error(`JDK ${build.jdkVersion} 未安装，请先在环境部署中安装`)
+    }
+
+    // 输出环境变量信息
+    await logAndExec(buildId, `echo "=== 环境变量检查 ===" && echo "ANDROID_HOME: ${androidHome}" && echo "JAVA_HOME: ${javaHome}" && echo "Java 版本:" && ${javaHome}/bin/java -version 2>&1 | head -1`)
+
+    // 执行构建
+    await logAndExec(buildId, `export ANDROID_HOME=${androidHome} && export JAVA_HOME=${javaHome} && export PATH=$JAVA_HOME/bin:$PATH && cd ${repoDir} && ./gradlew ${build.gradleTask}`)
 
     // 6. 查找并复制 APK
     try {

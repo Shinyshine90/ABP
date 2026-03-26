@@ -63,7 +63,7 @@ export const buildApi = {
     }
     return api.get<BuildTask[]>(`/projects/${projectId}/builds`)
   },
-  create: async (projectId: number, branch?: string, gradleTask?: string) => {
+  create: async (projectId: number, branch?: string, gradleTask?: string, jdkVersion?: string) => {
     if (USE_MOCK) {
       await delay(500)
       const newBuild = { id: Date.now(), project_id: projectId, status: 'pending' as const, started_at: new Date().toLocaleString() }
@@ -71,7 +71,7 @@ export const buildApi = {
       mockBuilds[projectId].unshift(newBuild)
       return { data: newBuild }
     }
-    return api.post<BuildTask>('/builds', { project_id: projectId, branch, gradle_task: gradleTask })
+    return api.post<BuildTask>('/builds', { project_id: projectId, branch, gradle_task: gradleTask, jdk_version: jdkVersion })
   },
   getById: (id: number) => api.get<BuildTask>(`/builds/${id}`),
   getLogs: async (id: number) => {

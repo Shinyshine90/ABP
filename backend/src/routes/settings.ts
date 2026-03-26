@@ -3,6 +3,7 @@ import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { authMiddleware } from '../middleware/auth.js'
 import { getConfig, updateConfig, paths } from '../config.js'
 import { prisma } from '../db.js'
@@ -46,9 +47,12 @@ router.get('/check-env', authMiddleware, async (req, res) => {
   } catch {}
 
   try {
-    const { stdout } = await execAsync('which adb || where adb')
-    result.androidSdk = { installed: !!stdout.trim(), version: 'Installed' }
-  } catch {}
+    const config = getConfig()
+    const sdkManagerPath = path.join(paths.sdkManager(config.workspaceDir), 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+    if (fs.existsSync(sdkManagerPath)) {
+      result.androidSdk = { installed: true, version: 'SDK Manager' }
+    }
+  } catch {}{}
 
   res.json(result)
 })
@@ -91,7 +95,9 @@ router.post('/install-env', authMiddleware, async (req, res) => {
 })
 
 router.post('/install-tool', authMiddleware, async (req, res) => {
-  const { tool, version, sudo_password } = req.body
+  const { tool, version } = req.body
+  const config = getConfig()
+  const sudo_password = config.sudoPassword
 
   res.setHeader('Content-Type', 'application/json')
   res.setHeader('Transfer-Encoding', 'chunked')
@@ -170,36 +176,67 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
         send(100, '安装完成', e.message || 'Git installation completed')
       }
     } else if (tool === 'jdk') {
+      const jdkDir = paths.jdk(config.workspaceDir, version)
+      const tempDir = paths.temp(config.workspaceDir)
+      const jdkTarball = path.join(tempDir, `jdk-${version}.tar.gz`)
+
       send(5, '准备安装 JDK...', 'Preparing installation')
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await execAsync(`mkdir -p ${tempDir}`)
 
-      send(30, `下载 JDK ${version}...`, `Downloading JDK ${version}`)
-      const jdkCmd = version === '17' ? 'openjdk-17-jdk' : version === '11' ? 'openjdk-11-jdk' : 'openjdk-21-jdk'
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const jdkUrls: { [key: string]: string } = {
+        '8': 'https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jdk_x64_linux_hotspot_8u432b06.tar.gz',
+        '11': 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.25%2B9/OpenJDK11U-jdk_x64_linux_hotspot_11.0.25_9.tar.gz',
+        '17': 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz'
+      }
 
-      send(50, '解压安装 JDK...', `$ sudo apt-get install -y ${jdkCmd}`)
-      await execWithSudoStreaming('apt-get', ['install', '-y', jdkCmd], (line) => {
-        send(50, '安装 JDK...', line)
+      const jdkUrl = jdkUrls[version]
+      if (!jdkUrl) {
+        throw new Error(`不支持的 JDK 版本: ${version}`)
+      }
+
+      send(15, `下载 JDK ${version}...`, `$ wget ${jdkUrl}`)
+      const wgetProc = spawn('bash', ['-c', `cd ${tempDir} && wget ${jdkUrl} -O ${jdkTarball} 2>&1`])
+      let buffer = ''
+      wgetProc.stdout?.on('data', (data) => {
+        buffer += data.toString()
+        const segments = buffer.split('\r')
+        buffer = segments[segments.length - 1]
+        for (let i = 0; i < segments.length - 1; i++) {
+          const lines = segments[i].split('\n').filter((l: string) => l.trim())
+          lines.forEach((line: string) => {
+            send(15, `下载 JDK ${version}...`, line)
+          })
+        }
+        const lastSegmentLines = buffer.split('\n')
+        if (lastSegmentLines.length > 1) {
+          for (let i = 0; i < lastSegmentLines.length - 1; i++) {
+            if (lastSegmentLines[i].trim()) {
+              send(15, `下载 JDK ${version}...`, lastSegmentLines[i])
+            }
+          }
+          buffer = lastSegmentLines[lastSegmentLines.length - 1]
+        }
+      })
+      await new Promise((resolve, reject) => {
+        wgetProc.on('close', (code) => {
+          if (buffer.trim()) {
+            send(15, `下载 JDK ${version}...`, buffer.trim())
+          }
+          code === 0 ? resolve(code) : reject(new Error('下载失败'))
+        })
       })
 
-      send(70, '配置 JAVA_HOME...', 'Setting JAVA_HOME environment variable')
-      try {
-        await execAsync(`echo "export JAVA_HOME=/usr/lib/jvm/java-${version}-openjdk-amd64" >> ~/.bashrc || true`)
-      } catch {}
-      await new Promise(resolve => setTimeout(resolve, 500))
+      send(50, '解压 JDK...', `$ tar -xzf jdk-${version}.tar.gz`)
+      await execAsync(`mkdir -p ${jdkDir}`)
+      await execAsync(`tar -xzf ${jdkTarball} -C ${jdkDir} --strip-components=1`)
 
-      send(85, '更新环境变量...', 'Updating PATH')
-      try {
-        await execAsync(`echo "export PATH=$JAVA_HOME/bin:$PATH" >> ~/.bashrc || true`)
-      } catch {}
+      send(80, '验证安装...', 'Verifying installation')
+      const { stdout: javaVersion } = await execAsync(`${jdkDir}/bin/java -version 2>&1`)
 
-      send(95, '检测环境...', 'Verifying installation')
-      try {
-        const { stdout: javaVersion } = await execAsync('java -version 2>&1')
-        send(100, '安装完成', `JDK installed: ${javaVersion.split('\n')[0]}`)
-      } catch (e) {
-        send(100, '安装完成', 'JDK installation completed')
-      }
+      send(90, '清理临时文件...', 'Cleaning up')
+      await execAsync(`rm -f ${jdkTarball}`)
+
+      send(100, '安装完成', `JDK ${version} installed: ${javaVersion.split('\n')[0]}`)
     } else if (tool === 'android_sdk') {
       const config = getConfig()
       const tempDir = paths.temp(config.workspaceDir)
@@ -208,6 +245,18 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
 
       send(5, '准备安装 Android SDK...', 'Preparing installation')
       await new Promise(resolve => setTimeout(resolve, 500))
+
+      // 检查并安装 unzip
+      send(10, '检查依赖...', 'Checking for unzip')
+      try {
+        await execAsync('which unzip')
+        send(10, '检查依赖...', 'unzip is installed')
+      } catch {
+        send(15, '安装 unzip...', '$ sudo apt-get install -y unzip')
+        await execWithSudoStreaming('apt-get', ['install', '-y', 'unzip'], (line) => {
+          send(15, '安装 unzip...', line)
+        })
+      }
 
       send(25, `下载 SDK 工具...`, '$ wget commandlinetools-linux')
       const sdkUrl = 'https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip'
@@ -247,7 +296,14 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
       try {
         await execAsync(`mkdir -p ${sdkManagerDir}/cmdline-tools`)
         await execAsync(`cd ${tempDir} && unzip -o -q ${sdkZip} -d ${sdkManagerDir}/cmdline-tools`)
-        await execAsync(`mv ${sdkManagerDir}/cmdline-tools/cmdline-tools ${sdkManagerDir}/cmdline-tools/latest 2>/dev/null || true`)
+
+        // 验证解压是否成功
+        const cmdlineToolsPath = path.join(sdkManagerDir, 'cmdline-tools', 'cmdline-tools')
+        if (!fs.existsSync(cmdlineToolsPath)) {
+          throw new Error('解压后未找到 cmdline-tools 目录')
+        }
+
+        await execAsync(`mv ${sdkManagerDir}/cmdline-tools/cmdline-tools ${sdkManagerDir}/cmdline-tools/latest`)
         send(40, '解压 SDK...', 'Extracted successfully')
       } catch (e: any) {
         throw new Error(`解压失败: ${e.message}`)
@@ -272,10 +328,21 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
       })
 
       send(80, '配置环境变量...', 'Setting ANDROID_HOME')
+
+      // 设置当前进程的环境变量
+      process.env.ANDROID_HOME = sdkManagerDir
+      process.env.PATH = `${process.env.PATH}:${sdkManagerDir}/cmdline-tools/latest/bin:${sdkManagerDir}/platform-tools`
+
+      // 写入 shell 配置文件
+      const homeDir = process.env.HOME || os.homedir()
+      const bashrcPath = path.join(homeDir, '.bashrc')
       try {
-        await execAsync(`echo "export ANDROID_HOME=${sdkManagerDir}" >> ~/.bashrc`)
-        await execAsync(`echo "export PATH=\\$PATH:${sdkManagerDir}/cmdline-tools/latest/bin:${sdkManagerDir}/platform-tools" >> ~/.bashrc`)
-      } catch {}
+        const envVars = `\n# Android SDK\nexport ANDROID_HOME=${sdkManagerDir}\nexport PATH=$PATH:${sdkManagerDir}/cmdline-tools/latest/bin:${sdkManagerDir}/platform-tools\n`
+        fs.appendFileSync(bashrcPath, envVars)
+        send(80, '配置环境变量...', `Environment variables written to ${bashrcPath}`)
+      } catch (e: any) {
+        send(80, '配置环境变量...', `Warning: Could not write to .bashrc: ${e.message}`)
+      }
 
       send(90, '清理临时文件...', 'Cleaning up')
       try {
@@ -289,6 +356,9 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
       } catch {
         throw new Error('安装验证失败')
       }
+
+      // 保存到配置
+      updateConfig({ androidHome: sdkManagerDir })
     }
 
     res.end()

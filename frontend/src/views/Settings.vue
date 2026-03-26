@@ -4,7 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { settingsApi } from '../api'
 
 const settings = ref({
-  workspaceDir: '/tmp/apk-builds'
+  workspaceDir: '/tmp/apk-builds',
+  sudoPassword: ''
 })
 
 const envStatus = ref({
@@ -260,6 +261,9 @@ const confirmClear = async () => {
       <el-form :model="settings" label-width="150px">
         <el-form-item label="工作目录">
           <el-input v-model="settings.workspaceDir" placeholder="/tmp/apk-builds" />
+        </el-form-item>
+        <el-form-item label="管理员密码">
+          <el-input v-model="settings.sudoPassword" type="password" placeholder="用于 sudo 命令" show-password />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSave">保存设置</el-button>

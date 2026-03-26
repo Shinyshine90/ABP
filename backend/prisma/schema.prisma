@@ -34,6 +34,7 @@ model Build {
   projectId  Int       @map("project_id")
   branch     String    @default("main")
   gradleTask String    @default("assembleRelease") @map("gradle_task")
+  jdkVersion String    @default("17") @map("jdk_version")
   status     String    @default("pending")
   version    String?
   gitCommit  String?   @map("git_commit")

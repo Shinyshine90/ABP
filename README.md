@@ -15,6 +15,7 @@
 - 数据库模型和 ORM（SQLite）
 - 前后端联调（已打通）
 - 系统设置（工作目录、JDK、SDK 配置）
+- 多 JDK 版本支持（JDK 8/11/17 独立管理）
 - 字段格式转换（camelCase ↔ snake_case）
 
 ### ⏳ 待完成
