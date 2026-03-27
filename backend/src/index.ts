@@ -34,8 +34,23 @@ app.get('/api/projects/:id/builds', async (req, res) => {
   res.json(toSnakeCase(builds))
 })
 
+async function initDefaultUser() {
+  const { prisma } = await import('./db.js')
+  const bcrypt = (await import('bcryptjs')).default
+
+  const existingUser = await prisma.user.findUnique({ where: { username: 'admin' } })
+  if (!existingUser) {
+    const hashedPassword = await bcrypt.hash('admin123', 10)
+    await prisma.user.create({
+      data: { username: 'admin', password: hashedPassword }
+    })
+    console.log('✓ 默认管理员账号已创建 (admin/admin123)')
+  }
+}
+
 async function start() {
   await initializeDirectories()
+  await initDefaultUser()
 
   const server = http.createServer(app)
   initWebSocket(server)

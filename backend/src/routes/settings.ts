@@ -183,7 +183,29 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
       send(5, '准备安装 JDK...', 'Preparing installation')
       await execAsync(`mkdir -p ${tempDir}`)
 
-      const jdkUrls: { [key: string]: string } = {
+      // 检查 wget
+      send(8, '检查依赖...', 'Checking for wget')
+      try {
+        await execAsync('which wget')
+        send(8, '检查依赖...', 'wget is installed')
+      } catch {
+        send(10, '安装 wget...', '$ brew install wget')
+        if (os.platform() === 'darwin') {
+          await execAsync('brew install wget')
+        } else {
+          await execWithSudoStreaming('apt-get', ['install', '-y', 'wget'], (line) => {
+            send(10, '安装 wget...', line)
+          })
+        }
+      }
+
+      const platform = os.platform()
+      const isMac = platform === 'darwin'
+      const jdkUrls: { [key: string]: string } = isMac ? {
+        '8': 'https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jdk_x64_mac_hotspot_8u432b06.tar.gz',
+        '11': 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.25%2B9/OpenJDK11U-jdk_x64_mac_hotspot_11.0.25_9.tar.gz',
+        '17': 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_mac_hotspot_17.0.13_11.tar.gz'
+      } : {
         '8': 'https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jdk_x64_linux_hotspot_8u432b06.tar.gz',
         '11': 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.25%2B9/OpenJDK11U-jdk_x64_linux_hotspot_11.0.25_9.tar.gz',
         '17': 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz'
@@ -327,22 +349,11 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
         proc.on('close', (code) => code === 0 ? resolve(code) : reject(new Error('License failed')))
       })
 
-      send(80, '配置环境变量...', 'Setting ANDROID_HOME')
+      send(80, '配置进程环境变量...', 'Setting ANDROID_HOME for build process')
 
-      // 设置当前进程的环境变量
+      // 设置当前进程的环境变量（仅用于后续构建，不污染系统环境）
       process.env.ANDROID_HOME = sdkManagerDir
       process.env.PATH = `${process.env.PATH}:${sdkManagerDir}/cmdline-tools/latest/bin:${sdkManagerDir}/platform-tools`
-
-      // 写入 shell 配置文件
-      const homeDir = process.env.HOME || os.homedir()
-      const bashrcPath = path.join(homeDir, '.bashrc')
-      try {
-        const envVars = `\n# Android SDK\nexport ANDROID_HOME=${sdkManagerDir}\nexport PATH=$PATH:${sdkManagerDir}/cmdline-tools/latest/bin:${sdkManagerDir}/platform-tools\n`
-        fs.appendFileSync(bashrcPath, envVars)
-        send(80, '配置环境变量...', `Environment variables written to ${bashrcPath}`)
-      } catch (e: any) {
-        send(80, '配置环境变量...', `Warning: Could not write to .bashrc: ${e.message}`)
-      }
 
       send(90, '清理临时文件...', 'Cleaning up')
       try {
