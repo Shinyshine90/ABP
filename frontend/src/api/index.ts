@@ -45,7 +45,8 @@ export const projectApi = {
   },
   update: (id: number, data: Partial<Project>) => api.put<Project>(`/projects/${id}`, data),
   delete: (id: number) => api.delete(`/projects/${id}`),
-  validateGit: (gitUrl: string, branch: string) => api.post('/projects/validate-git', { git_url: gitUrl, branch })
+  validateGit: (gitUrl: string, branch: string) => api.post('/projects/validate-git', { git_url: gitUrl, branch }),
+  getBuildOptions: (id: number) => api.get<{ branches: string[], flavors: string[], tasks: string[], synced: boolean, syncError: string }>(`/projects/${id}/build-options`)
 }
 
 export const buildApi = {
@@ -99,7 +100,8 @@ export const settingsApi = {
   installTool: (tool: string, version: string) => api.post('/settings/install-tool', { tool, version }),
   getCacheInfo: () => api.get('/settings/cache-info'),
   clearCache: (data: { target?: string; strategy?: string; days?: number }) => api.post('/settings/clear-cache', data),
-  getSshKey: () => api.get('/settings/ssh-key')
+  getSshKey: () => api.get('/settings/ssh-key'),
+  getAvailableJdk: () => api.get<{ version: string, path: string, source: string }[]>('/settings/available-jdk')
 }
 
 export const statsApi = {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { buildApi, projectApi } from '../api'
-import { ElMessage } from 'element-plus'
+import { buildApi, projectApi, settingsApi } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { BuildTask, Project } from '../types'
 
 const route = useRoute()
@@ -12,14 +12,16 @@ const project = ref<Project | null>(null)
 const builds = ref<BuildTask[]>([])
 const loading = ref(false)
 const buildDialogVisible = ref(false)
+const dialogLoading = ref(false)
 const buildForm = ref({
   branch: '',
   gradle_task: '',
   jdk_version: '17'
 })
 
-const branches = ['main', 'develop', 'release', 'feature/new-ui']
-const gradleTasks = ['assembleDebug', 'assembleRelease', 'assembleProductionRelease', 'assembleStagingDebug']
+const availableBranches = ref<string[]>([])
+const availableTasks = ref<string[]>([])
+const availableJdks = ref<{ version: string; source: string }[]>([])
 
 const statusConfig: Record<string, { icon: string; color: string; text: string }> = {
   pending: { icon: '⏳', color: '#909399', text: '等待中' },
@@ -53,9 +55,45 @@ const fetchBuilds = async () => {
   }
 }
 
-const openBuildDialog = () => {
+const openBuildDialog = async () => {
   buildForm.value = { branch: 'main', gradle_task: 'assembleRelease', jdk_version: '17' }
   buildDialogVisible.value = true
+  dialogLoading.value = true
+  try {
+    const [optionsRes, jdksRes] = await Promise.all([
+      projectApi.getBuildOptions(projectId).catch(() => null),
+      settingsApi.getAvailableJdk().catch(() => null)
+    ])
+
+    availableBranches.value = optionsRes?.data?.branches?.length ? optionsRes.data.branches : ['main', 'master']
+    availableTasks.value = optionsRes?.data?.tasks?.length ? optionsRes.data.tasks : ['assembleDebug', 'assembleRelease']
+    availableJdks.value = jdksRes?.data?.length ? jdksRes.data : [
+      { version: '8', source: 'system' },
+      { version: '11', source: 'system' },
+      { version: '17', source: 'system' }
+    ]
+
+    if (optionsRes?.data?.syncError) {
+      ElMessage.warning(`代码同步失败：${optionsRes.data.syncError}，分支信息可能不是最新的`)
+    }
+
+    // 默认选第一个可用选项
+    if (!availableBranches.value.includes(buildForm.value.branch)) {
+      buildForm.value.branch = availableBranches.value[0]
+    }
+    if (!availableTasks.value.includes(buildForm.value.gradle_task)) {
+      buildForm.value.gradle_task = availableTasks.value[0]
+    }
+    if (!availableJdks.value.find(j => j.version === buildForm.value.jdk_version)) {
+      buildForm.value.jdk_version = availableJdks.value[0].version
+    }
+  } catch {
+    availableBranches.value = ['main', 'master']
+    availableTasks.value = ['assembleDebug', 'assembleRelease']
+    availableJdks.value = [{ version: '8', source: 'system' }, { version: '11', source: 'system' }, { version: '17', source: 'system' }]
+  } finally {
+    dialogLoading.value = false
+  }
 }
 
 const triggerBuild = async () => {
@@ -76,6 +114,19 @@ const viewLogs = (buildId: number) => {
 const downloadApk = (buildId: number) => {
   window.open(`http://localhost:3000/api/builds/${buildId}/download`, '_blank')
 }
+
+const deleteProject = async () => {
+  try {
+    await ElMessageBox.confirm('确定要删除此项目吗？此操作不可恢复。', '警告', { type: 'warning' })
+    await projectApi.delete(projectId)
+    ElMessage.success('项目已删除')
+    router.push('/projects')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
+}
 </script>
 
 <template>
@@ -85,7 +136,10 @@ const downloadApk = (buildId: number) => {
         <h1 style="margin: 0; font-size: 28px; color: #2c3e50">{{ project?.name || '项目详情' }}</h1>
         <p style="margin: 5px 0 0 0; color: #666">项目 #{{ projectId }}</p>
       </div>
-      <el-button type="primary" size="large" @click="openBuildDialog">🚀 立即构建</el-button>
+      <div>
+        <el-button type="danger" size="large" @click="deleteProject" style="margin-right: 10px">删除项目</el-button>
+        <el-button type="primary" size="large" @click="openBuildDialog">🚀 立即构建</el-button>
+      </div>
     </div>
 
     <el-card shadow="never" style="margin-bottom: 20px">
@@ -125,18 +179,25 @@ const downloadApk = (buildId: number) => {
     </el-card>
 
     <el-dialog v-model="buildDialogVisible" title="配置构建" width="400px">
-      <el-form :model="buildForm" label-width="100px">
+      <el-form v-loading="dialogLoading" :model="buildForm" label-width="100px">
         <el-form-item label="分支">
-          <el-input v-model="buildForm.branch" placeholder="main" />
+          <el-select v-model="buildForm.branch" allow-create filterable placeholder="main" style="width: 100%">
+            <el-option v-for="branch in availableBranches" :key="branch" :label="branch" :value="branch" />
+          </el-select>
         </el-form-item>
         <el-form-item label="构建任务">
-          <el-input v-model="buildForm.gradle_task" placeholder="assembleRelease" />
+          <el-select v-model="buildForm.gradle_task" allow-create filterable placeholder="assembleRelease" style="width: 100%">
+            <el-option v-for="task in availableTasks" :key="task" :label="task" :value="task" />
+          </el-select>
         </el-form-item>
         <el-form-item label="JDK 版本">
           <el-select v-model="buildForm.jdk_version">
-            <el-option label="JDK 8" value="8" />
-            <el-option label="JDK 11" value="11" />
-            <el-option label="JDK 17" value="17" />
+            <el-option
+              v-for="jdk in availableJdks"
+              :key="jdk.version"
+              :label="`JDK ${jdk.version} (${jdk.source === 'workspace' ? 'Workspace' : '系统'})`"
+              :value="jdk.version"
+            />
           </el-select>
         </el-form-item>
       </el-form>

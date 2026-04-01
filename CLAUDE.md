@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Android APK automated build platform with Git repository management, build automation, and log viewing.
 
-**Stack**: Vue 3 + TypeScript (frontend), Node.js + Express + Prisma (backend)
+**Stack**: Vue 3 + TypeScript (frontend), Node.js + Express + Prisma (backend), SQLite (database)
 
 ## Development Commands
 
@@ -33,12 +33,13 @@ npm run test:watch       # Run tests in watch mode
 ### Backend Structure
 ```
 backend/src/
-├── routes/          # API endpoints (auth, projects, builds, settings)
+├── routes/          # API endpoints (auth, projects, builds, settings, stats)
 ├── services/        # Business logic (build execution engine)
 ├── middleware/      # Auth middleware (JWT verification)
 ├── utils/           # Utilities (git, transform)
 ├── config.ts        # System configuration (workspace paths)
 ├── db.ts            # Prisma client instance
+├── websocket.ts     # WebSocket server for real-time log streaming
 └── index.ts         # Express app entry point
 ```
 
@@ -68,13 +69,13 @@ frontend/src/
 ### Data Flow
 1. User triggers build → POST /api/builds → Creates DB record with status='pending'
 2. `startBuild()` runs async → Updates status to 'running' → Executes git clone + gradle build
-3. Logs written to DB via `logAndExec()` → Frontend polls GET /api/builds/:id/logs
+3. Logs streamed via WebSocket and written to DB → Frontend receives real-time logs via `ws://localhost:3000/ws`
 4. Build completes → Status updated to 'success' or 'failed'
 
 ### Database Schema (Prisma + SQLite)
 - **User**: username, password (bcrypt hashed)
-- **Project**: name, gitUrl, branch, gradleTask, description
-- **Build**: projectId, status, gitCommit, startedAt, finishedAt, apkPath
+- **Project**: name, gitUrl, cloneMethod (http/ssh), description
+- **Build**: projectId, branch, gradleTask, jdkVersion (8/11/17), status, gitCommit, createdBy, apkPath
 - **BuildLog**: buildId, logType (stdout/stderr), content, timestamp
 
 ## Important Notes
@@ -91,14 +92,27 @@ frontend/src/
 - Conversion handled by `toSnakeCase()` utility in backend responses
 
 ### Configuration
-- Backend: `.env` file (DATABASE_URL, JWT_SECRET, PORT)
-- System settings: Stored in-memory via `config.ts` (workspaceDir, jdkPath, androidSdkPath)
+- Backend: `.env` file (DATABASE_URL, JWT_SECRET, PORT, WORKSPACE_DIR)
+- System settings: Stored in-memory via `config.ts` (workspaceDir, androidHome)
 - Frontend API base URL: Hardcoded to `http://localhost:3000/api`
 
+### Build System
+- Multi-JDK support: JDK 8/11/17 managed in `workspace/jdk-manager/jdk-{version}`
+- Android SDK: Configurable via `androidHome` or defaults to `workspace/sdk-manager`
+- Build output: `workspace/builds/{buildId}/output/`
+- Repository cache: `workspace/repos/{projectId}/`
+- WebSocket: Real-time log streaming at `ws://localhost:3000/ws`
+
 ### Testing
-- Test user: admin / admin123 (created via POST /api/auth/register)
-- Frontend tests: Vitest + Vue Test Utils (minimal coverage currently)
+- Test user: admin / admin123 (auto-created on first startup)
+- Frontend tests: Vitest + Vue Test Utils (`npm run test` or `npm run test:watch`)
 - Backend: No tests implemented yet
+
+### Environment Setup
+- Settings page provides tool installation (JDK, Android SDK)
+- API: `GET /api/settings/check-env`, `GET /api/settings/available-versions`, `POST /api/settings/install-tool`
+- Cache management: `GET /api/settings/cache-info`, `POST /api/settings/clear-cache`
+- SSH key management: `GET /api/settings/ssh-key`
 
 ## Common Tasks
 
@@ -119,7 +133,6 @@ frontend/src/
 3. Update navigation if needed
 
 ## Known Issues
-- Build logs not real-time (polling required, WebSocket not implemented)
-- No APK file download functionality
+- No APK file download functionality (APKs are copied to output directory but no download endpoint)
 - No build queue management (concurrent builds may overload)
 - Git operations lack proper error handling and input validation

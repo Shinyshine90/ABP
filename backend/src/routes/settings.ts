@@ -23,7 +23,7 @@ router.put('/', authMiddleware, (req, res) => {
 router.get('/available-versions', authMiddleware, (req, res) => {
   res.json({
     git: ['2.43.0', '2.42.0', '2.41.0'],
-    jdk: ['17', '11', '21'],
+    jdk: ['8', '11', '17', '18', '21'],
     android_sdk: ['34', '33', '32']
   })
 })
@@ -31,7 +31,10 @@ router.get('/available-versions', authMiddleware, (req, res) => {
 router.get('/check-env', authMiddleware, async (req, res) => {
   const result = {
     git: { installed: false, version: '' },
-    jdk: { installed: false, version: '' },
+    jdk: {
+      system: { installed: false, version: '' },
+      workspace: { '8': false, '11': false, '17': false, '18': false, '21': false } as Record<string, boolean>
+    },
     androidSdk: { installed: false, version: '' }
   }
 
@@ -40,10 +43,22 @@ router.get('/check-env', authMiddleware, async (req, res) => {
     result.git = { installed: true, version: stdout.trim() }
   } catch {}
 
+  // 检查系统 JDK
   try {
     const { stdout } = await execAsync('java -version 2>&1')
     const match = stdout.match(/version "(.+?)"/)
-    result.jdk = { installed: true, version: match ? match[1] : stdout.split('\n')[0] }
+    result.jdk.system = { installed: true, version: match ? match[1] : stdout.split('\n')[0] }
+  } catch {}
+
+  // 检查 workspace JDK
+  try {
+    const config = getConfig()
+    for (const version of ['8', '11', '17', '18', '21']) {
+      const jdkPath = paths.jdk(config.workspaceDir, version)
+      if (fs.existsSync(path.join(jdkPath, 'bin', 'java'))) {
+        result.jdk.workspace[version] = true
+      }
+    }
   } catch {}
 
   try {
@@ -52,7 +67,7 @@ router.get('/check-env', authMiddleware, async (req, res) => {
     if (fs.existsSync(sdkManagerPath)) {
       result.androidSdk = { installed: true, version: 'SDK Manager' }
     }
-  } catch {}{}
+  } catch {}
 
   res.json(result)
 })
@@ -201,14 +216,19 @@ router.post('/install-tool', authMiddleware, async (req, res) => {
 
       const platform = os.platform()
       const isMac = platform === 'darwin'
+      // 使用华为云镜像加速下载
       const jdkUrls: { [key: string]: string } = isMac ? {
-        '8': 'https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jdk_x64_mac_hotspot_8u432b06.tar.gz',
-        '11': 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.25%2B9/OpenJDK11U-jdk_x64_mac_hotspot_11.0.25_9.tar.gz',
-        '17': 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_mac_hotspot_17.0.13_11.tar.gz'
+        '8': 'https://repo.huaweicloud.com/java/jdk/8u202-b08/jdk-8u202-macosx-x64.dmg',
+        '11': 'https://repo.huaweicloud.com/java/jdk/11.0.2+9/jdk-11.0.2_osx-x64_bin.tar.gz',
+        '17': 'https://repo.huaweicloud.com/java/jdk/17.0.2+8/jdk-17.0.2_macos-x64_bin.tar.gz',
+        '18': 'https://repo.huaweicloud.com/java/jdk/18.0.2+9/jdk-18.0.2_macos-x64_bin.tar.gz',
+        '21': 'https://repo.huaweicloud.com/java/jdk/21.0.1+12/jdk-21.0.1_macos-x64_bin.tar.gz'
       } : {
-        '8': 'https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jdk_x64_linux_hotspot_8u432b06.tar.gz',
-        '11': 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.25%2B9/OpenJDK11U-jdk_x64_linux_hotspot_11.0.25_9.tar.gz',
-        '17': 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz'
+        '8': 'https://repo.huaweicloud.com/java/jdk/8u202-b08/jdk-8u202-linux-x64.tar.gz',
+        '11': 'https://repo.huaweicloud.com/java/jdk/11.0.2+9/jdk-11.0.2_linux-x64_bin.tar.gz',
+        '17': 'https://repo.huaweicloud.com/java/jdk/17.0.2+8/jdk-17.0.2_linux-x64_bin.tar.gz',
+        '18': 'https://repo.huaweicloud.com/java/jdk/18.0.2+9/jdk-18.0.2_linux-x64_bin.tar.gz',
+        '21': 'https://repo.huaweicloud.com/java/jdk/21.0.1+12/jdk-21.0.1_linux-x64_bin.tar.gz'
       }
 
       const jdkUrl = jdkUrls[version]
@@ -385,8 +405,16 @@ router.get('/cache-info', authMiddleware, async (req, res) => {
 
     const getSize = async (dir: string) => {
       try {
-        const { stdout } = await execAsync(`du -sb "${dir}" 2>/dev/null || echo "0"`)
-        return Math.round((parseInt(stdout.split('\t')[0] || '0') / 1024 / 1024) * 100) / 100
+        // macOS 使用 -k (KB), Linux 使用 -b (bytes)
+        const isMac = os.platform() === 'darwin'
+        const cmd = isMac
+          ? `du -sk "${dir}" 2>/dev/null || echo "0"`
+          : `du -sb "${dir}" 2>/dev/null || echo "0"`
+        const { stdout } = await execAsync(cmd)
+        const size = parseInt(stdout.split('\t')[0] || '0')
+        // macOS 返回 KB，Linux 返回 bytes
+        const sizeInMB = isMac ? size / 1024 : size / 1024 / 1024
+        return Math.round(sizeInMB * 100) / 100
       } catch {
         return 0
       }
@@ -432,6 +460,71 @@ router.get('/ssh-key', authMiddleware, async (req, res) => {
   }
 })
 
+router.get('/available-jdk', authMiddleware, async (req, res) => {
+  const jdkVersions = ['8', '11', '17', '18', '21']
+  const result: { version: string; path: string; source: 'workspace' | 'system' }[] = []
+
+  const config = getConfig()
+
+  // Check workspace JDKs
+  for (const version of jdkVersions) {
+    const jdkPath = paths.jdk(config.workspaceDir, version)
+    if (fs.existsSync(path.join(jdkPath, 'bin', 'java'))) {
+      result.push({ version, path: jdkPath, source: 'workspace' })
+    }
+  }
+
+  const workspaceVersions = new Set(result.map(r => r.version))
+
+  // Check system JDKs
+  const platform = os.platform()
+  if (platform === 'darwin') {
+    try {
+      const { stdout } = await execAsync('/usr/libexec/java_home -V 2>&1')
+      const lines = stdout.split('\n')
+      for (const line of lines) {
+        // Lines like: `    18.0.2 (arm64) "vendor" - "name" /path/to/home`
+        const match = line.match(/^\s+([\d._]+)\s+\([^)]+\).*\s(\/\S+)$/)
+        if (match) {
+          const rawVer = match[1]
+          const jdkHomePath = match[2].trim()
+          let version: string
+          if (rawVer.startsWith('1.')) {
+            version = rawVer.split('.')[1]
+          } else {
+            version = rawVer.split('.')[0]
+          }
+          if (!workspaceVersions.has(version)) {
+            result.push({ version, path: jdkHomePath, source: 'system' })
+            workspaceVersions.add(version)
+          }
+        }
+      }
+    } catch {}
+  } else if (platform === 'linux') {
+    try {
+      const jvmDir = '/usr/lib/jvm'
+      if (fs.existsSync(jvmDir)) {
+        const entries = fs.readdirSync(jvmDir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue
+          const javaBin = path.join(jvmDir, entry.name, 'bin', 'java')
+          if (!fs.existsSync(javaBin)) continue
+          const nameMatch = entry.name.match(/(\d+)/)
+          if (!nameMatch) continue
+          const version = nameMatch[1]
+          if (!workspaceVersions.has(version)) {
+            result.push({ version, path: path.join(jvmDir, entry.name), source: 'system' })
+            workspaceVersions.add(version)
+          }
+        }
+      }
+    } catch {}
+  }
+
+  res.json(result)
+})
+
 router.post('/clear-cache', authMiddleware, async (req, res) => {
   try {
     const { strategy, days, target } = req.body
@@ -444,8 +537,11 @@ router.post('/clear-cache', authMiddleware, async (req, res) => {
       // 清理临时文件
       const tempDir = paths.temp(config.workspaceDir)
       try {
-        const { stdout } = await execAsync(`du -sb "${tempDir}" 2>/dev/null || echo "0"`)
-        const bytes = parseInt(stdout.split('\t')[0] || '0')
+        const isMac = os.platform() === 'darwin'
+        const cmd = isMac ? `du -sk "${tempDir}" 2>/dev/null || echo "0"` : `du -sb "${tempDir}" 2>/dev/null || echo "0"`
+        const { stdout } = await execAsync(cmd)
+        const size = parseInt(stdout.split('\t')[0] || '0')
+        const bytes = isMac ? size * 1024 : size
         freedSpace += bytes
         await execAsync(`rm -rf ${tempDir}/* 2>/dev/null || true`)
         await execAsync(`mkdir -p ${tempDir}`)
@@ -478,8 +574,11 @@ router.post('/clear-cache', authMiddleware, async (req, res) => {
         if (!resolvedPath.startsWith(resolvedWorkspace)) continue
 
         try {
-          const { stdout } = await execAsync(`du -sb "${buildDir}" 2>/dev/null || echo "0"`)
-          const bytes = parseInt(stdout.split('\t')[0] || '0')
+          const isMac = os.platform() === 'darwin'
+          const cmd = isMac ? `du -sk "${buildDir}" 2>/dev/null || echo "0"` : `du -sb "${buildDir}" 2>/dev/null || echo "0"`
+          const { stdout } = await execAsync(cmd)
+          const size = parseInt(stdout.split('\t')[0] || '0')
+          const bytes = isMac ? size * 1024 : size
           freedSpace += bytes
 
           await execAsync(`rm -rf "${buildDir}"`)

@@ -10,7 +10,10 @@ const settings = ref({
 
 const envStatus = ref({
   git: { installed: false, version: '' },
-  jdk: { installed: false, version: '' },
+  jdk: {
+    system: { installed: false, version: '' },
+    workspace: { '8': false, '11': false, '17': false, '18': false, '21': false }
+  },
   androidSdk: { installed: false, version: '' }
 })
 
@@ -226,8 +229,22 @@ const confirmClear = async () => {
           <span v-else style="color: #f56c6c">✗ 未安装</span>
         </el-descriptions-item>
         <el-descriptions-item label="JDK">
-          <span v-if="envStatus.jdk.installed" style="color: #67c23a">✓ 已安装 {{ envStatus.jdk.version }}</span>
-          <span v-else style="color: #f56c6c">✗ 未安装</span>
+          <div>
+            <div style="margin-bottom: 8px">
+              <strong>系统 JDK:</strong>
+              <span v-if="envStatus.jdk.system.installed" style="color: #67c23a; margin-left: 8px">
+                ✓ {{ envStatus.jdk.system.version }}
+              </span>
+              <span v-else style="color: #f56c6c; margin-left: 8px">✗ 未安装</span>
+            </div>
+            <div>
+              <strong>Workspace JDK:</strong>
+              <span v-for="ver in ['8', '11', '17', '18', '21']" :key="ver" style="margin-left: 8px">
+                <span v-if="envStatus.jdk.workspace[ver]" style="color: #67c23a">✓ {{ ver }}</span>
+                <span v-else style="color: #909399">✗ {{ ver }}</span>
+              </span>
+            </div>
+          </div>
         </el-descriptions-item>
         <el-descriptions-item label="Android SDK">
           <span v-if="envStatus.androidSdk.installed" style="color: #67c23a">✓ 已安装 {{ envStatus.androidSdk.version }}</span>

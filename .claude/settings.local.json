@@ -30,7 +30,20 @@
       "Bash(chmod:*)",
       "Bash(xargs -r kill -9)",
       "Bash(lsof -ti:5173)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(bash start.sh)",
+      "Bash(./start.sh)",
+      "Bash(npx vue-tsc:*)",
+      "Bash(lsof -i :3000 -sTCP:LISTEN)",
+      "Bash(timeout 20 ./gradlew tasks --no-daemon --console=plain)",
+      "Bash(gtimeout 15 ./gradlew tasks --no-daemon --console=plain)",
+      "Bash(rm -f ~/.gradle/wrapper/dists/gradle-5.4.1-all/1jkdto6ec7o8pep4874j0q1o8h/gradle-5.4.1-all.zip.lck)",
+      "Bash(rm -f ~/.gradle/wrapper/dists/gradle-5.4.1-all/1jkdto6ec7o8pep4874j0q1o8h/gradle-5.4.1-all.zip.part)",
+      "Bash(/usr/libexec/java_home -V 2>&1)",
+      "Bash(/usr/libexec/java_home -v 1.8)",
+      "Bash(/usr/libexec/java_home -v 11)",
+      "Bash(/usr/libexec/java_home -v 17)",
+      "Bash(git stash:*)"
     ]
   }
 }

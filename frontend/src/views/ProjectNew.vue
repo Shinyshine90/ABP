@@ -7,7 +7,6 @@ import { projectApi } from '../api'
 const router = useRouter()
 
 const form = ref({
-  name: '',
   gitUrl: '',
   cloneMethod: 'http',
   description: ''
@@ -17,8 +16,8 @@ const validating = ref(false)
 const creating = ref(false)
 
 const handleSubmit = async () => {
-  if (!form.value.name || !form.value.gitUrl) {
-    ElMessage.warning('请填写项目名称和 Git 仓库地址')
+  if (!form.value.gitUrl) {
+    ElMessage.warning('请填写 Git 仓库地址')
     return
   }
 
@@ -35,15 +34,14 @@ const handleSubmit = async () => {
   creating.value = true
   try {
     const { data } = await projectApi.create({
-      name: form.value.name,
       git_url: form.value.gitUrl,
       clone_method: form.value.cloneMethod,
       description: form.value.description
     })
     ElMessage.success('项目创建成功')
     router.push(`/projects/${data.id}`)
-  } catch {
-    ElMessage.error('项目创建失败')
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.error || '项目创建失败')
   } finally {
     creating.value = false
   }
@@ -55,11 +53,9 @@ const handleSubmit = async () => {
     <h1 style="margin-bottom: 30px; font-size: 28px; color: #2c3e50">新建项目</h1>
     <el-card shadow="never" style="max-width: 800px">
       <el-form :model="form" label-width="120px">
-        <el-form-item label="项目名称" required>
-          <el-input v-model="form.name" placeholder="请输入项目名称" />
-        </el-form-item>
         <el-form-item label="Git 仓库" required>
           <el-input v-model="form.gitUrl" placeholder="https://github.com/user/repo.git" />
+          <div style="color: #909399; font-size: 12px; margin-top: 5px">项目名称将自动从仓库 URL 中提取</div>
         </el-form-item>
         <el-form-item label="克隆方式">
           <el-radio-group v-model="form.cloneMethod">
