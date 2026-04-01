@@ -133,8 +133,21 @@ const viewLogs = (buildId: number) => {
   router.push(`/builds/${buildId}/logs`)
 }
 
-const downloadApk = (buildId: number) => {
-  window.open(`http://localhost:3000/api/builds/${buildId}/download`, '_blank')
+const downloadApk = async (buildId: number) => {
+  try {
+    const res = await buildApi.download(buildId)
+    const disposition = res.headers['content-disposition'] || ''
+    const match = disposition.match(/filename="?(.+?)"?$/)
+    const filename = match ? match[1] : `build-${buildId}.apk`
+    const url = URL.createObjectURL(new Blob([res.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    ElMessage.error('下载失败，APK 文件可能不存在')
+  }
 }
 
 const deleteProject = async () => {

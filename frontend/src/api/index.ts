@@ -83,7 +83,8 @@ export const buildApi = {
     }
     return api.get<BuildLog[]>(`/builds/${id}/logs`)
   },
-  cancel: (id: number) => api.delete(`/builds/${id}`)
+  cancel: (id: number) => api.delete(`/builds/${id}`),
+  download: (id: number) => api.get(`/builds/${id}/download`, { responseType: 'blob' })
 }
 
 export const authApi = {

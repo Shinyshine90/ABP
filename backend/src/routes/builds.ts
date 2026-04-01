@@ -1,8 +1,11 @@
 import { Router } from 'express'
+import path from 'path'
+import fs from 'fs'
 import { prisma } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { startBuild } from '../services/build.js'
 import { toSnakeCase } from '../utils/transform.js'
+import { getConfig } from '../config.js'
 
 const router = Router()
 
@@ -61,7 +64,14 @@ router.get('/:id/download', authMiddleware, async (req, res) => {
     return res.status(404).json({ error: 'APK file not found' })
   }
 
-  res.download(build.apkPath)
+  const { workspaceDir } = getConfig()
+  const absolutePath = path.resolve(workspaceDir, build.apkPath)
+
+  if (!fs.existsSync(absolutePath)) {
+    return res.status(404).json({ error: 'APK file not found on disk' })
+  }
+
+  res.download(absolutePath)
 })
 
 export default router
