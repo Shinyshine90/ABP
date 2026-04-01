@@ -46,7 +46,8 @@ export const projectApi = {
   update: (id: number, data: Partial<Project>) => api.put<Project>(`/projects/${id}`, data),
   delete: (id: number) => api.delete(`/projects/${id}`),
   validateGit: (gitUrl: string, branch: string) => api.post('/projects/validate-git', { git_url: gitUrl, branch }),
-  getBuildOptions: (id: number) => api.get<{ branches: string[], flavors: string[], tasks: string[], synced: boolean, syncError: string }>(`/projects/${id}/build-options`)
+  getBuildOptions: (id: number) => api.get<{ branches: string[], synced: boolean, syncError: string }>(`/projects/${id}/build-options`, { timeout: 60000 }),
+  getBranchFlavors: (id: number, branch: string) => api.get<{ flavors: string[], tasks: string[] }>(`/projects/${id}/branch-flavors`, { params: { branch } })
 }
 
 export const buildApi = {

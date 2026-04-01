@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { buildApi, projectApi, settingsApi } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -55,6 +55,29 @@ const fetchBuilds = async () => {
   }
 }
 
+const flavorLoading = ref(false)
+
+const fetchBranchFlavors = async (branch: string) => {
+  flavorLoading.value = true
+  try {
+    const { data } = await projectApi.getBranchFlavors(projectId, branch)
+    availableTasks.value = data.tasks?.length ? data.tasks : ['assembleDebug', 'assembleRelease']
+    if (!availableTasks.value.includes(buildForm.value.gradle_task)) {
+      buildForm.value.gradle_task = availableTasks.value[0]
+    }
+  } catch {
+    availableTasks.value = ['assembleDebug', 'assembleRelease']
+  } finally {
+    flavorLoading.value = false
+  }
+}
+
+watch(() => buildForm.value.branch, (newBranch) => {
+  if (newBranch && buildDialogVisible.value) {
+    fetchBranchFlavors(newBranch)
+  }
+})
+
 const openBuildDialog = async () => {
   buildForm.value = { branch: 'main', gradle_task: 'assembleRelease', jdk_version: '17' }
   buildDialogVisible.value = true
@@ -66,7 +89,6 @@ const openBuildDialog = async () => {
     ])
 
     availableBranches.value = optionsRes?.data?.branches?.length ? optionsRes.data.branches : ['main', 'master']
-    availableTasks.value = optionsRes?.data?.tasks?.length ? optionsRes.data.tasks : ['assembleDebug', 'assembleRelease']
     availableJdks.value = jdksRes?.data?.length ? jdksRes.data : [
       { version: '8', source: 'system' },
       { version: '11', source: 'system' },
@@ -81,12 +103,12 @@ const openBuildDialog = async () => {
     if (!availableBranches.value.includes(buildForm.value.branch)) {
       buildForm.value.branch = availableBranches.value[0]
     }
-    if (!availableTasks.value.includes(buildForm.value.gradle_task)) {
-      buildForm.value.gradle_task = availableTasks.value[0]
-    }
     if (!availableJdks.value.find(j => j.version === buildForm.value.jdk_version)) {
       buildForm.value.jdk_version = availableJdks.value[0].version
     }
+
+    // 加载默认分支的 flavor
+    await fetchBranchFlavors(buildForm.value.branch)
   } catch {
     availableBranches.value = ['main', 'master']
     availableTasks.value = ['assembleDebug', 'assembleRelease']
@@ -186,7 +208,7 @@ const deleteProject = async () => {
           </el-select>
         </el-form-item>
         <el-form-item label="构建任务">
-          <el-select v-model="buildForm.gradle_task" allow-create filterable placeholder="assembleRelease" style="width: 100%">
+          <el-select v-model="buildForm.gradle_task" v-loading="flavorLoading" allow-create filterable placeholder="assembleRelease" style="width: 100%">
             <el-option v-for="task in availableTasks" :key="task" :label="task" :value="task" />
           </el-select>
         </el-form-item>

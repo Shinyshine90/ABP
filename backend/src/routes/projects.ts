@@ -78,15 +78,23 @@ router.get('/:id/build-options', authMiddleware, async (req, res) => {
     // 1. 同步代码
     if (fs.existsSync(repoDir)) {
       try {
-        await execAsync(`git -C "${repoDir}" fetch --all --prune`, { timeout: 30000 })
+        // 修正 refspec，确保浅克隆的仓库也能拉到所有分支
+        await execAsync(
+          `git -C "${repoDir}" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`,
+          { timeout: 10000 }
+        )
+        await execAsync(`git -C "${repoDir}" fetch --all --prune 2>/dev/null`, { timeout: 30000 })
         synced = true
       } catch (e) {
         syncError = (e as Error).message
       }
     } else {
-      // 仓库还没克隆，先克隆
+      // 仓库还没克隆，初始化并拉取所有分支引用
       try {
-        await execAsync(`git clone --depth 1 "${project.gitUrl}" "${repoDir}"`, { timeout: 60000 })
+        fs.mkdirSync(repoDir, { recursive: true })
+        await execAsync(`git -C "${repoDir}" init 2>/dev/null`, { timeout: 10000 })
+        await execAsync(`git -C "${repoDir}" remote add origin "${project.gitUrl}"`, { timeout: 10000 })
+        await execAsync(`git -C "${repoDir}" fetch --all --prune 2>/dev/null`, { timeout: 60000 })
         synced = true
       } catch (e) {
         syncError = (e as Error).message
@@ -118,39 +126,78 @@ router.get('/:id/build-options', authMiddleware, async (req, res) => {
     }
     if (branches.length === 0) branches = ['main', 'master']
 
-    // 3. 解析 flavor（从已同步的工作树读取 build.gradle）
-    const flavors: string[] = []
-    const gradleCandidates = [
-      path.join(repoDir, 'app', 'build.gradle'),
-      path.join(repoDir, 'app', 'build.gradle.kts'),
-    ]
-    try {
-      const subdirs = fs.readdirSync(repoDir, { withFileTypes: true })
-        .filter(d => d.isDirectory() && !['app', '.git'].includes(d.name))
-        .map(d => path.join(repoDir, d.name, 'build.gradle'))
-      gradleCandidates.push(...subdirs)
-    } catch {}
+    res.json({ branches, synced, syncError })
+  } catch (e) {
+    res.json({ branches: ['main', 'master'], synced: false, syncError: (e as Error).message })
+  }
+})
 
-    let gradleContent = ''
-    for (const f of gradleCandidates) {
-      if (fs.existsSync(f)) { gradleContent = fs.readFileSync(f, 'utf-8'); break }
+// 解析指定分支的 flavor 和构建任务（通过 git show 读取，无需 checkout）
+router.get('/:id/branch-flavors', authMiddleware, async (req, res) => {
+  const defaultTasks = ['assembleDebug', 'assembleRelease']
+  const branch = (req.query.branch as string) || 'main'
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id: Number(req.params.id) } })
+    if (!project) return res.status(404).json({ error: 'Project not found' })
+
+    const config = getConfig()
+    const repoDir = paths.projectRepo(config.workspaceDir, project.id)
+
+    if (!fs.existsSync(repoDir)) {
+      return res.json({ flavors: [], tasks: defaultTasks })
     }
 
-    if (gradleContent) {
-      const blockMatch = gradleContent.match(/productFlavors\s*\{([\s\S]*?)\n\s*\}/m)
-      if (blockMatch) {
-        const block = blockMatch[1]
-        // Groovy DSL
-        for (const m of block.matchAll(/^\s{1,8}(\w+)\s*\{/gm)) {
-          if (!flavors.includes(m[1])) flavors.push(m[1])
-        }
-        // Kotlin DSL
-        if (flavors.length === 0) {
-          for (const m of block.matchAll(/(?:create|register)\s*\(\s*["'](\w+)["']/g)) {
-            if (!flavors.includes(m[1])) flavors.push(m[1])
-          }
+    // 收集所有可能包含 productFlavors 的 gradle 文件
+    // 优先搜索独立的 flavor 定义文件（如 script/flavors.gradle）
+    const ref = (p: string) => `origin/${branch}:${p}`
+    const candidates = [
+      ref('script/flavors.gradle'),
+      ref('script/flavors.gradle.kts'),
+      ref('app/build.gradle'),
+      ref('app/build.gradle.kts'),
+    ]
+
+    // 列出根目录下的子目录，追加更多候选路径
+    try {
+      const { stdout } = await execAsync(
+        `git -C "${repoDir}" ls-tree --name-only "origin/${branch}"`,
+        { timeout: 10000 }
+      )
+      for (const name of stdout.split('\n').filter(Boolean)) {
+        if (!['app', '.git', 'script'].includes(name)) {
+          candidates.push(ref(`${name}/build.gradle`))
+          candidates.push(ref(`${name}/build.gradle.kts`))
         }
       }
+    } catch {}
+
+    // 逐个读取候选文件，解析 productFlavors
+    const flavors: string[] = []
+    for (const candidate of candidates) {
+      let content = ''
+      try {
+        const { stdout } = await execAsync(
+          `git -C "${repoDir}" show "${candidate}"`,
+          { timeout: 10000 }
+        )
+        content = stdout
+      } catch { continue }
+
+      const blockMatch = content.match(/productFlavors\s*\{([\s\S]*?)\n\s*\}/m)
+      if (!blockMatch) continue
+      const block = blockMatch[1]
+
+      // Groovy DSL: 'J177' { ... } 或 "J177" { ... } 或 J177 { ... }
+      for (const m of block.matchAll(/^\s*['"]?(\w+)['"]?\s*\{/gm)) {
+        if (!flavors.includes(m[1])) flavors.push(m[1])
+      }
+      // Kotlin DSL: create("X") / register("X") / getByName("X")（排除 signingConfigs.getByName 等链式调用）
+      for (const m of block.matchAll(/(?<!\.)(?:create|register|getByName)\s*\(\s*["'](\w+)["']/g)) {
+        if (!flavors.includes(m[1])) flavors.push(m[1])
+      }
+
+      if (flavors.length > 0) break
     }
 
     const tasks = flavors.length === 0
@@ -159,9 +206,9 @@ router.get('/:id/build-options', authMiddleware, async (req, res) => {
           ['Debug', 'Release'].map(t => `assemble${f.charAt(0).toUpperCase() + f.slice(1)}${t}`)
         )
 
-    res.json({ branches, flavors, tasks, synced, syncError })
-  } catch (e) {
-    res.json({ branches: ['main', 'master'], flavors: [], tasks: defaultTasks, synced: false, syncError: (e as Error).message })
+    res.json({ flavors, tasks })
+  } catch {
+    res.json({ flavors: [], tasks: defaultTasks })
   }
 })
 
